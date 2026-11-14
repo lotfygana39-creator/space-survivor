@@ -151,6 +151,7 @@ jobs:
           name: space-survivor-exe
           path: dl-exe
       - name: Name the files
+        working-directory: .
         run: |
           mkdir -p out
           cp dl-apk/app-debug.apk out/SpaceSurvivor.apk
