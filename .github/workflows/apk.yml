@@ -2,6 +2,8 @@ name: Build APK
 on:
   push:
   workflow_dispatch:
+permissions:
+  contents: write
 defaults:
   run:
     working-directory: apk-project
@@ -10,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unpack an uploaded zip (if there is one)
+      - name: Unpack an uploaded zip (if there is one) and save the files
         working-directory: .
         run: |
           Z=$(find . -name '*.zip' -not -path './node_modules/*' | head -n1)
@@ -19,6 +21,13 @@ jobs:
             rm -rf /tmp/up && mkdir /tmp/up && unzip -o "$Z" -d /tmp/up
             I=$(find /tmp/up -name index.html | head -n1)
             cp -rf "$(dirname "$I")"/. apk-project/
+            rm -rf apk-project/.github
+            rm -f "$Z"
+            git config user.name "github-actions"
+            git config user.email "actions@github.com"
+            git add -A
+            git commit -m "Unpack uploaded zip" || true
+            git push || true
           fi
           ls apk-project
       - uses: actions/setup-node@v4
@@ -78,3 +87,79 @@ jobs:
         with:
           name: space-survivor-apk
           path: apk-project/android/app/build/outputs/apk/debug/app-debug.apk
+
+  windows:
+    needs: apk
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Build Windows app
+        shell: bash
+        run: |
+          mkdir -p desktop && cp index.html desktop/index.html && cd desktop
+          cat > package.json <<'JSON'
+          {
+            "name": "space-survivor",
+            "version": "1.0.0",
+            "description": "Space Survivor",
+            "author": "Space Survivor",
+            "main": "main.js",
+            "devDependencies": { "electron": "^31.0.0", "electron-builder": "^24.13.3" },
+            "build": {
+              "appId": "com.spacesurvivor.game",
+              "productName": "Space Survivor",
+              "files": ["main.js", "index.html"],
+              "win": { "target": "portable", "artifactName": "SpaceSurvivor.exe" }
+            }
+          }
+          JSON
+          cat > main.js <<'JS'
+          const { app, BrowserWindow, session, Menu } = require('electron');
+          function createWindow() {
+            Menu.setApplicationMenu(null);
+            const w = new BrowserWindow({ width: 1280, height: 720, backgroundColor: '#020814', autoHideMenuBar: true });
+            w.loadFile('index.html');
+            w.webContents.on('before-input-event', (e, i) => { if (i.type === 'keyDown' && i.key === 'F11') w.setFullScreen(!w.isFullScreen()); });
+          }
+          app.whenReady().then(() => {
+            session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => cb(permission === 'media'));
+            createWindow();
+          });
+          app.on('window-all-closed', () => app.quit());
+          JS
+          npm install
+          npx electron-builder --win portable --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: space-survivor-exe
+          path: apk-project/desktop/dist/SpaceSurvivor.exe
+
+  release:
+    needs: [apk, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: space-survivor-apk
+          path: dl-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: space-survivor-exe
+          path: dl-exe
+      - name: Name the files
+        run: |
+          mkdir -p out
+          cp dl-apk/app-debug.apk out/SpaceSurvivor.apk
+          cp dl-exe/SpaceSurvivor.exe out/SpaceSurvivor.exe
+          ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-build
+          name: Space Survivor (latest)
+          body: "Download SpaceSurvivor.apk for Android, or SpaceSurvivor.exe for Windows. Unsigned builds: your phone or Windows may warn that the app is unknown; choose to install or run anyway."
+          files: out/*
+          make_latest: true
