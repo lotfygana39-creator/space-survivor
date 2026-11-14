@@ -10,6 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Unpack an uploaded zip (if there is one)
+        working-directory: .
+        run: |
+          Z=$(find . -name '*.zip' -not -path './node_modules/*' | head -n1)
+          if [ -n "$Z" ]; then
+            echo "Found $Z"
+            rm -rf /tmp/up && mkdir /tmp/up && unzip -o "$Z" -d /tmp/up
+            I=$(find /tmp/up -name index.html | head -n1)
+            cp -rf "$(dirname "$I")"/. apk-project/
+          fi
+          ls apk-project
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - uses: actions/setup-java@v4
